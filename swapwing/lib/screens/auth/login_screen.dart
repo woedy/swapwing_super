@@ -3,6 +3,7 @@ import 'package:swapwing/services/auth_service.dart';
 import 'package:swapwing/screens/onboarding/onboarding_screen.dart';
 import 'package:swapwing/screens/main_navigation.dart';
 import 'package:swapwing/screens/auth/signup_screen.dart';
+import 'package:swapwing/screens/auth/verify_email_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -32,15 +33,42 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       await AuthService.login(_emailController.text, _passwordController.text);
-      
+
       if (mounted) {
         final hasCompletedOnboarding = await AuthService.hasCompletedOnboarding();
         final nextScreen = hasCompletedOnboarding ? MainNavigation() : OnboardingScreen();
-        
+
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (context) => nextScreen),
         );
       }
+    } on AuthException catch (e) {
+      if (!mounted) return;
+
+      final trimmedEmail = _emailController.text.trim();
+
+      if (e.code == 'email_not_verified' && trimmedEmail.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            action: SnackBarAction(
+              label: 'Verify now',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => VerifyEmailScreen(email: trimmedEmail),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message)),
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -57,13 +85,19 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       await AuthService.loginWithGoogle();
-      
+
       if (mounted) {
         final hasCompletedOnboarding = await AuthService.hasCompletedOnboarding();
         final nextScreen = hasCompletedOnboarding ? MainNavigation() : OnboardingScreen();
-        
+
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (context) => nextScreen),
+        );
+      }
+    } on AuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message)),
         );
       }
     } catch (e) {

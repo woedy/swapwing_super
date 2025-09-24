@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:swapwing/services/auth_service.dart';
-import 'package:swapwing/screens/onboarding/onboarding_screen.dart';
+import 'package:swapwing/screens/auth/verify_email_screen.dart';
 import 'package:swapwing/screens/auth/login_screen.dart';
 
 class SignUpScreen extends StatefulWidget {
@@ -12,6 +12,8 @@ class SignUpScreen extends StatefulWidget {
 
 class _SignUpScreenState extends State<SignUpScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _firstNameController = TextEditingController();
+  final _lastNameController = TextEditingController();
   final _usernameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -23,6 +25,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
   @override
   void dispose() {
+    _firstNameController.dispose();
+    _lastNameController.dispose();
     _usernameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
@@ -42,15 +46,34 @@ class _SignUpScreenState extends State<SignUpScreen> {
     setState(() => _isLoading = true);
 
     try {
-      await AuthService.signUp(
-        _emailController.text,
-        _passwordController.text,
-        _usernameController.text,
+      final email = await AuthService.signUp(
+        email: _emailController.text,
+        password: _passwordController.text,
+        confirmPassword: _confirmPasswordController.text,
+        username: _usernameController.text,
+        firstName: _firstNameController.text,
+        lastName: _lastNameController.text,
       );
-      
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'We\'ve sent a verification email to $email. Please confirm to continue.',
+          ),
+        ),
+      );
+
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (context) => VerifyEmailScreen(email: email),
+        ),
+      );
+    } on AuthException catch (e) {
       if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => OnboardingScreen()),
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message)),
         );
       }
     } catch (e) {
@@ -69,10 +92,16 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
     try {
       await AuthService.loginWithGoogle();
-      
+
       if (mounted) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (context) => OnboardingScreen()),
+        );
+      }
+    } on AuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message)),
         );
       }
     } catch (e) {
@@ -124,7 +153,83 @@ class _SignUpScreenState extends State<SignUpScreen> {
               ),
               
               SizedBox(height: 40),
-              
+
+              // First Name field
+              TextFormField(
+                controller: _firstNameController,
+                textCapitalization: TextCapitalization.words,
+                decoration: InputDecoration(
+                  labelText: 'First Name',
+                  hintText: 'Enter your first name',
+                  prefixIcon: Icon(
+                    Icons.badge_outlined,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide(
+                      color: Theme.of(context).colorScheme.outline.withOpacity(0.5),
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide(
+                      color: Theme.of(context).colorScheme.primary,
+                      width: 2,
+                    ),
+                  ),
+                ),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Please enter your first name';
+                  }
+                  return null;
+                },
+              ),
+
+              SizedBox(height: 24),
+
+              // Last Name field
+              TextFormField(
+                controller: _lastNameController,
+                textCapitalization: TextCapitalization.words,
+                decoration: InputDecoration(
+                  labelText: 'Last Name',
+                  hintText: 'Enter your last name',
+                  prefixIcon: Icon(
+                    Icons.badge,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide(
+                      color: Theme.of(context).colorScheme.outline.withOpacity(0.5),
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide(
+                      color: Theme.of(context).colorScheme.primary,
+                      width: 2,
+                    ),
+                  ),
+                ),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Please enter your last name';
+                  }
+                  return null;
+                },
+              ),
+
+              SizedBox(height: 24),
+
               // Username field
               TextFormField(
                 controller: _usernameController,

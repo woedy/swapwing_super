@@ -80,7 +80,7 @@ Use this as a living roadmap. Check items off as they complete, and append new i
 - [x] Add pytest + coverage, enforce via CI.
 
 ### Frontend (Flutter)
-- [ ] Replace sample auth with live API integration and secure token storage.
+- [x] Replace sample auth with live API integration and secure token storage.
 - [ ] Wire listings Home/Search to backend with skeleton loaders and error states.
 - [ ] Build create-listing wizard with media picker/upload feedback.
 - [ ] Implement journey composer with drafts and previews.

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:swapwing/services/auth_service.dart';
+import 'package:swapwing/screens/auth/verify_email_screen.dart';
 import 'package:swapwing/screens/auth/welcome_screen.dart';
 import 'package:swapwing/screens/onboarding/onboarding_screen.dart';
 import 'package:swapwing/screens/main_navigation.dart';
@@ -60,7 +61,12 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
       
       Widget nextScreen;
       if (!isLoggedIn) {
-        nextScreen = WelcomeScreen();
+        final pendingEmail = await AuthService.getPendingVerificationEmail();
+        if (pendingEmail != null && pendingEmail.isNotEmpty) {
+          nextScreen = VerifyEmailScreen(email: pendingEmail);
+        } else {
+          nextScreen = WelcomeScreen();
+        }
       } else if (!hasCompletedOnboarding) {
         nextScreen = OnboardingScreen();
       } else {
