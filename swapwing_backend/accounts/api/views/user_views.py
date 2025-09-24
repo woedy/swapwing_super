@@ -1,15 +1,14 @@
-import json
 import re
-
-import requests
+from datetime import timedelta
 
 from django.conf import settings
-from django.contrib.auth import get_user_model, authenticate
+from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.hashers import check_password
 from django.contrib.auth.password_validation import validate_password
 from django.core.mail import send_mail
 from django.template.loader import get_template
+from django.utils import timezone
 from rest_framework import status, generics
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
@@ -17,11 +16,19 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.api.serializers import PasswordResetSerializer, UserRegistrationSerializer
+from accounts.api.serializers import (
+    EmailVerificationSerializer,
+    PasswordResetSerializer,
+    ResendEmailVerificationSerializer,
+    UserRegistrationSerializer,
+)
+from accounts.models import EmailVerificationToken
+from accounts.services import issue_email_verification_token, mark_user_email_verified
+from accounts.tasks import send_email_verification
 from all_activities.models import AllActivity
 from garage.models import UserDesire, Garage
 
-from mysite.utils import generate_random_otp_code, generate_email_token, base64_file
+from mysite.utils import base64_file, generate_random_otp_code
 from user_profile.models import PersonalInfo, Wallet
 
 User = get_user_model()
@@ -292,117 +299,48 @@ def check_username_and_email_exist(request):
 
     return Response(payload, status=status.HTTP_200_OK)
 
-@api_view(['POST', ])
-@permission_classes([])
+@api_view(["POST"])
+@permission_classes([AllowAny])
 @authentication_classes([])
 def user_registration_view(request):
-    payload = {}
-    data = {}
-    errors = {}
-    email_errors = []
-
-    email = request.data.get('email', '0').lower()
-    username = request.data.get('username', '0')
-    first_name = request.data.get('first_name', '0')
-    last_name = request.data.get('last_name', '0')
-    password = request.data.get('password', '0')
-    password2 = request.data.get('password2', '0')
-    phone = request.data.get('phone', '0')
-    country = request.data.get('country', '0')
-    gender = request.data.get('gender', '0')
-
-
-
-    if not email:
-        email_errors.append('Email is required.')
-        if email_errors:
-            errors['email'] = email_errors
-            payload['message'] = "Error"
-            payload['errors'] = errors
-            return Response(payload, status=status.HTTP_404_NOT_FOUND)
-
-    qs = User.objects.filter(email=email)
-    if qs.exists():
-        email_errors.append('Email is already exists.')
-        if email_errors:
-            errors['email'] = email_errors
-            payload['message'] = "Error"
-            payload['errors'] = errors
-            return Response(payload, status=status.HTTP_404_NOT_FOUND)
-
-
-
-
     serializer = UserRegistrationSerializer(data=request.data)
-    if serializer.is_valid():
-        user = serializer.save()
-        data['email'] = user.email
-        data['first_name'] = user.first_name
-        data['last_name'] = user.last_name
+    serializer.is_valid(raise_exception=True)
 
-        personal_info = PersonalInfo.objects.get(user=user)
+    user = serializer.save()
+
+    personal_info = PersonalInfo.objects.get(user=user)
+    phone = request.data.get("phone")
+    country = request.data.get("country")
+    gender = request.data.get("gender")
+    if phone:
         personal_info.phone = phone
+    if country:
         personal_info.country = country
+    if gender:
         personal_info.gender = gender
+    personal_info.save()
 
+    Wallet.objects.get_or_create(user=user)
+    Garage.objects.get_or_create(user=user)
 
-        personal_info.save()
+    verification_token = issue_email_verification_token(user)
+    send_email_verification.delay(verification_token.id)
 
-        data['phone'] = personal_info.phone
+    AllActivity.objects.create(
+        user=user,
+        subject="User Registration",
+        body=f"{user.email} just created an account.",
+    )
 
-        wallet = Wallet.objects.create(
-            user=user,
-        )
+    payload = {
+        "message": "Successful",
+        "data": {
+            "email": user.email,
+            "expires_in_minutes": settings.EMAIL_VERIFICATION_TOKEN_TTL_MINUTES,
+        },
+    }
 
-
-        token = Token.objects.get(user=user).key
-        data['token'] = token
-
-        email_token = generate_email_token()
-
-        user = User.objects.get(email=email)
-        user.email_token = email_token
-        user.save()
-
-        context = {
-            'email_token': email_token,
-            'email': user.email,
-            'first_name': user.first_name,
-            'last_name': user.last_name
-        }
-
-        txt_ = get_template("registration/emails/verify.txt").render(context)
-        html_ = get_template("registration/emails/verify.html").render(context)
-
-        subject = 'EMAIL CONFIRMATION CODE'
-        from_email = settings.DEFAULT_FROM_EMAIL
-        recipient_list = [user.email]
-
-        sent_mail = send_mail(
-            subject,
-            txt_,
-            from_email,
-            recipient_list,
-            html_message=html_,
-            fail_silently=False
-        )
-
-        new_activity = AllActivity.objects.create(
-            user=user,
-            subject="User Registration",
-            body=user.email + " Just created an account."
-        )
-        new_activity.save()
-
-        garage = Garage.objects.create(
-            user=user,
-        )
-
-
-    payload['message'] = "Successful"
-    payload['data'] = data
-
-    return Response(payload, status=status.HTTP_200_OK)
+    return Response(payload, status=status.HTTP_201_CREATED)
 
 
 
@@ -586,167 +524,93 @@ def validate_password(password):
 
 
 
-@api_view(['POST', ])
-@permission_classes([])
+@api_view(["POST"])
+@permission_classes([AllowAny])
 @authentication_classes([])
 def verify_user_email(request):
-    payload = {}
-    data = {}
-    errors = {}
-    email_errors = []
-    token_errors = []
-    password_errors = []
+    serializer = EmailVerificationSerializer(
+        data={
+            "email": request.data.get("email"),
+            "code": request.data.get("email_token") or request.data.get("code"),
+            "token": request.data.get("token"),
+        }
+    )
+    serializer.is_valid(raise_exception=True)
 
-    email = request.data.get('email', '0').lower()
-    email_token = request.data.get('email_token', '0')
-
-    if not email:
-        email_errors.append('Email is required.')
-    if email_errors:
-        errors['email'] = email_errors
-        payload['message'] = "Error"
-        payload['errors'] = errors
-        return Response(payload, status=status.HTTP_404_NOT_FOUND)
-
-    qs = User.objects.filter(email=email)
-    if not qs.exists():
-        email_errors.append('Email does not exist.')
-        if email_errors:
-            errors['email'] = email_errors
-            payload['message'] = "Error"
-            payload['errors'] = errors
-            return Response(payload, status=status.HTTP_404_NOT_FOUND)
-
-    if not email_token:
-        token_errors.append('Token is required.')
-        if token_errors:
-            errors['token'] = token_errors
-            payload['message'] = "Error"
-            payload['errors'] = errors
-            return Response(payload, status=status.HTTP_404_NOT_FOUND)
-
-    user = User.objects.get(email=email)
-    if email_token != user.email_token:
-        token_errors.append('Invalid Token.')
-        if token_errors:
-            errors['token'] = token_errors
-            payload['message'] = "Error"
-            payload['errors'] = errors
-            return Response(payload, status=status.HTTP_404_NOT_FOUND)
+    email = serializer.validated_data["email"].lower()
+    code = serializer.validated_data.get("code")
+    token_value = serializer.validated_data.get("token")
 
     try:
-        user_personal_info = PersonalInfo.objects.get(user=user)
-    except PersonalInfo.DoesNotExist:
-        user_personal_info = PersonalInfo.objects.create(user=user)
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        return Response(
+            {
+                "message": "Error",
+                "errors": {"email": ["Email does not exist."]},
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
 
-    try:
-        token = Token.objects.get(user=user)
-    except Token.DoesNotExist:
-        token = Token.objects.create(user=user)
+    if user.email_verified:
+        return Response(
+            {
+                "message": "Error",
+                "errors": {"email": ["Email already verified."]},
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
-    user.is_active = True
-    user.email_verified = True
-    user.save()
+    verification_qs = EmailVerificationToken.objects.filter(
+        user=user,
+        consumed_at__isnull=True,
+    )
+    if code:
+        verification_qs = verification_qs.filter(code=code)
+    if token_value:
+        verification_qs = verification_qs.filter(token=token_value)
 
+    verification = verification_qs.order_by("-created_at").first()
+    if not verification:
+        return Response(
+            {
+                "message": "Error",
+                "errors": {"token": ["Invalid or expired verification code."]},
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
-    data["user_id"] = user.user_id
-    data["email"] = user.email
-    data["first_name"] = user.first_name
-    data["last_name"] = user.last_name
-    data["token"] = token.key
+    if verification.is_expired:
+        verification.mark_consumed()
+        return Response(
+            {
+                "message": "Error",
+                "errors": {"token": ["Verification code has expired."]},
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
-    payload['message'] = "Successful"
-    payload['data'] = data
+    verification.mark_consumed()
+    mark_user_email_verified(user)
 
-    new_activity = AllActivity.objects.create(
+    token, _ = Token.objects.get_or_create(user=user)
+
+    payload = {
+        "message": "Successful",
+        "data": {
+            "user_id": user.user_id,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "token": token.key,
+        },
+    }
+
+    AllActivity.objects.create(
         user=user,
         subject="Verify Email",
-        body=user.email + " just verified their email",
+        body=f"{user.email} just verified their email",
     )
-    new_activity.save()
-
-    return Response(payload, status=status.HTTP_200_OK)
-
-
-
-@api_view(['POST', ])
-@permission_classes([])
-@authentication_classes([])
-def verify_user_email22222(request):
-    payload = {}
-    data = {}
-    errors = {}
-    email_errors = []
-    token_errors = []
-    password_errors = []
-
-    email = request.data.get('email', '0').lower()
-    email_token = request.data.get('email_token', '0')
-
-    if not email:
-        email_errors.append('Email is required.')
-    if email_errors:
-        errors['email'] = email_errors
-        payload['message'] = "Error"
-        payload['errors'] = errors
-        return Response(payload, status=status.HTTP_404_NOT_FOUND)
-
-    qs = User.objects.filter(email=email)
-    if not qs.exists():
-        email_errors.append('Email does not exist.')
-        if email_errors:
-            errors['email'] = email_errors
-            payload['message'] = "Error"
-            payload['errors'] = errors
-            return Response(payload, status=status.HTTP_404_NOT_FOUND)
-
-    if not email_token:
-        token_errors.append('Token is required.')
-        if token_errors:
-            errors['token'] = token_errors
-            payload['message'] = "Error"
-            payload['errors'] = errors
-            return Response(payload, status=status.HTTP_404_NOT_FOUND)
-
-    user = User.objects.get(email=email)
-    if email_token != user.email_token:
-        token_errors.append('Invalid Token.')
-        if token_errors:
-            errors['token'] = token_errors
-            payload['message'] = "Error"
-            payload['errors'] = errors
-            return Response(payload, status=status.HTTP_404_NOT_FOUND)
-
-    try:
-        user_personal_info = PersonalInfo.objects.get(user=user)
-    except PersonalInfo.DoesNotExist:
-        user_personal_info = PersonalInfo.objects.create(user=user)
-
-    try:
-        token = Token.objects.get(user=user)
-    except Token.DoesNotExist:
-        token = Token.objects.create(user=user)
-
-    user.is_active = True
-    user.email_verified = True
-    user.save()
-
-
-    data["user_id"] = user.user_id
-    data["email"] = user.email
-    data["first_name"] = user.first_name
-    data["last_name"] = user.last_name
-    data["token"] = token.key
-
-    payload['message'] = "Successful"
-    payload['data'] = data
-
-    new_activity = AllActivity.objects.create(
-        user=user,
-        subject="Verify Email",
-        body=user.email + " just verified their email",
-    )
-    new_activity.save()
 
     return Response(payload, status=status.HTTP_200_OK)
 
@@ -957,77 +821,67 @@ def new_password_reset_view(request):
     return Response(payload, status=status.HTTP_200_OK)
 
 
-@api_view(['POST', ])
+@api_view(["POST"])
 @permission_classes([AllowAny])
 @authentication_classes([])
 def resend_email_verification(request):
-    payload = {}
-    data = {}
-    errors = {}
-    email_errors = []
+    serializer = ResendEmailVerificationSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
 
-
-    email = request.data.get('email', '0').lower()
-
-    if not email:
-        email_errors.append('Email is required.')
-    if email_errors:
-        errors['email'] = email_errors
-        payload['message'] = "Error"
-        payload['errors'] = errors
-        return Response(payload, status=status.HTTP_404_NOT_FOUND)
-
-    qs = User.objects.filter(email=email)
-    if not qs.exists():
-        email_errors.append('Email does not exist.')
-        if email_errors:
-            errors['email'] = email_errors
-            payload['message'] = "Error"
-            payload['errors'] = errors
-            return Response(payload, status=status.HTTP_404_NOT_FOUND)
-
+    email = serializer.validated_data["email"].lower()
     user = User.objects.filter(email=email).first()
-    otp_code = generate_random_otp_code()
-    user.otp_code = otp_code
-    user.save()
 
-    context = {
-        'otp_code': otp_code,
-        'email': user.email,
-        'first_name': user.first_name,
-        'last_name': user.last_name
-    }
+    if not user:
+        return Response(
+            {
+                "message": "Successful",
+                "data": {"status": "email_sent"},
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
 
-    txt_ = get_template("registration/emails/send_otp.txt").render(context)
-    html_ = get_template("registration/emails/send_otp.html").render(context)
+    if user.email_verified:
+        return Response(
+            {
+                "message": "Successful",
+                "data": {"status": "already_verified"},
+            },
+            status=status.HTTP_200_OK,
+        )
 
-    subject = 'OTP CODE'
-    from_email = settings.DEFAULT_FROM_EMAIL
-    recipient_list = [user.email]
-
-    sent_mail = send_mail(
-        subject,
-        txt_,
-        from_email,
-        recipient_list,
-        html_message=html_,
-        fail_silently=False
+    cooldown_window = timezone.now() - timedelta(
+        minutes=getattr(settings, "EMAIL_VERIFICATION_RESEND_COOLDOWN_MINUTES", 1)
     )
-    data["otp_code"] = otp_code
-    data["emai"] = user.email
-    data["user_id"] = user.user_id
 
-    new_activity = AllActivity.objects.create(
+    recent_token = (
+        EmailVerificationToken.objects.filter(user=user, created_at__gte=cooldown_window)
+        .order_by("-created_at")
+        .first()
+    )
+
+    if recent_token and not recent_token.is_expired:
+        verification_token = recent_token
+    else:
+        verification_token = issue_email_verification_token(user)
+
+    send_email_verification.delay(verification_token.id)
+
+    AllActivity.objects.create(
         user=user,
         subject="Email verification sent",
-        body="Email verification sent to " + user.email,
+        body=f"Email verification sent to {user.email}",
     )
-    new_activity.save()
 
-    payload['message'] = "Successful"
-    payload['data'] = data
-
-    return Response(payload, status=status.HTTP_200_OK)
+    return Response(
+        {
+            "message": "Successful",
+            "data": {
+                "email": user.email,
+                "expires_in_minutes": settings.EMAIL_VERIFICATION_TOKEN_TTL_MINUTES,
+            },
+        },
+        status=status.HTTP_202_ACCEPTED,
+    )
 
 
 

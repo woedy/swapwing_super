@@ -1,8 +1,12 @@
 <p>Hello {{ first_name }},</p>
 
-<p>Your email confirmation code is </p> <h1>{{email_token}}</h1>
+<p>Use the verification code below to activate your SwapWing account:</p>
+<h1 style="margin: 16px 0; font-size: 28px; letter-spacing: 4px;">{{ code }}</h1>
 
+<p>This code expires in {{ expires_in_minutes }} minutes.</p>
+<p>You can also <a href="{{ verification_url }}" target="_blank" rel="noopener">verify your email by clicking this link</a>.</p>
 
-<p>Once you activate, you can log in !</p>
-<p>Thank you,</p>
-<p>Samahat Barter</p>
+<p>If you didn't create a SwapWing account, please ignore this email or contact us at <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</p>
+
+<p>Thank you,<br />
+SwapWing Team</p>

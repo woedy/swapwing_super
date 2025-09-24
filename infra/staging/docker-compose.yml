@@ -1,0 +1,84 @@
+version: "3.9"
+
+services:
+  web:
+    build:
+      context: ../../swapwing_backend
+    command: gunicorn mysite.wsgi:application --bind 0.0.0.0:8000
+    env_file:
+      - ../../swapwing_backend/.env.staging
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-replace-me}
+      DJANGO_DEBUG: "False"
+      DATABASE_URL: postgresql://swapwing:swapwing-password@postgres:5432/swapwing
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "8000:8000"
+
+  worker:
+    build:
+      context: ../../swapwing_backend
+    command: celery -A mysite worker -l info
+    env_file:
+      - ../../swapwing_backend/.env.staging
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-replace-me}
+      DJANGO_DEBUG: "False"
+      DATABASE_URL: postgresql://swapwing:swapwing-password@postgres:5432/swapwing
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    depends_on:
+      - postgres
+      - redis
+
+  beat:
+    build:
+      context: ../../swapwing_backend
+    command: celery -A mysite beat -l info
+    env_file:
+      - ../../swapwing_backend/.env.staging
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-replace-me}
+      DJANGO_DEBUG: "False"
+      DATABASE_URL: postgresql://swapwing:swapwing-password@postgres:5432/swapwing
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    depends_on:
+      - postgres
+      - redis
+
+  flower:
+    image: mher/flower:1.2.0
+    command: ["flower", "--port=5555", "--url_prefix=flower"]
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+    depends_on:
+      - worker
+    ports:
+      - "5555:5555"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: swapwing
+      POSTGRES_USER: swapwing
+      POSTGRES_PASSWORD: swapwing-password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+volumes:
+  postgres_data:

@@ -1,9 +1,14 @@
+import secrets
+import string
+import uuid
+
 from django.conf import settings
 from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.db import models
 from django.db.models import Q
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
+from django.utils import timezone
 
 from rest_framework.authtoken.models import Token
 
@@ -130,4 +135,59 @@ def post_save_create_user_profile_objects_receiver(sender, instance, created, *a
         personal_info = PersonalInfo.objects.create(user=instance, active=True)
 
 post_save.connect(post_save_create_user_profile_objects_receiver, sender=User)
+
+
+class EmailVerificationToken(models.Model):
+    """Stores short-lived email verification codes for a user."""
+
+    CODE_LENGTH = getattr(settings, "EMAIL_VERIFICATION_CODE_LENGTH", 6)
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="email_verification_tokens",
+        on_delete=models.CASCADE,
+    )
+    code = models.CharField(max_length=10)
+    token = models.CharField(max_length=255, unique=True, editable=False)
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    uid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "code"]),
+            models.Index(fields=["expires_at"]),
+        ]
+
+    def __str__(self):
+        return f"EmailVerificationToken(user={self.user_id}, code={self.code})"
+
+    @property
+    def is_expired(self):
+        return timezone.now() >= self.expires_at
+
+    def mark_consumed(self):
+        if not self.consumed_at:
+            self.consumed_at = timezone.now()
+            self.save(update_fields=["consumed_at"])
+
+    def build_verification_url(self):
+        base_url = getattr(
+            settings,
+            "EMAIL_VERIFICATION_URL",
+            f"{getattr(settings, 'FRONTEND_BASE_URL', '').rstrip('/')}/verify-email",
+        )
+        base_url = base_url.rstrip("?")
+        separator = "&" if "?" in base_url else "?"
+        query = (
+            f"code={self.code}&token={self.token}&email={self.user.email}&uid={self.uid}"
+        )
+        return f"{base_url}{separator}{query}"
+
+    @classmethod
+    def generate_code(cls):
+        alphabet = string.digits
+        return "".join(secrets.choice(alphabet) for _ in range(cls.CODE_LENGTH))
 

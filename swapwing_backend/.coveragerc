@@ -1,0 +1,31 @@
+[run]
+source =
+    accounts
+    challenges
+    journeys
+    listings
+    notifications
+    user_profile
+omit =
+    */tests/*
+    */migrations/*
+    */admin.py
+    */apps.py
+    */wsgi.py
+    */asgi.py
+    */routing.py
+    */urls.py
+    */management/commands/*
+    */conftest.py
+    */__init__.py
+    */views.py
+    */views/*.py
+    */view.py
+    mysite/*
+branch = True
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __str__
+    if settings.DEBUG

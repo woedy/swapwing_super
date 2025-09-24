@@ -1,145 +1,203 @@
-from rest_framework import serializers
-from django.contrib.auth import get_user_model
+import json
 
-from garage.models import GarageItem, GarageItemImages, GarageItemComment, CanCounterWith, GarageItemCategory, \
-    GarageItemVideos
-from user_profile.models import PersonalInfo
+from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import URLValidator
+from django.utils.translation import gettext_lazy as _
+from rest_framework import serializers
+
+from listings.models import Listing, ListingMedia
 
 User = get_user_model()
 
-class ReactionPersonalInfoSerializer(serializers.ModelSerializer):
 
-    class Meta:
-        model = PersonalInfo
-        fields = ['id', 'photo',]
-
-class ReactionSerializer(serializers.ModelSerializer):
-    user_personal_info = ReactionPersonalInfoSerializer(many=False)
-
+class ListingOwnerSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['user_id', 'email', 'last_name', 'username', 'first_name', 'user_personal_info']
+        fields = ("user_id", "email", "first_name", "last_name")
+        read_only_fields = fields
 
-class ListingUserPersonalInfoSerializer(serializers.ModelSerializer):
 
-    class Meta:
-        model = PersonalInfo
-        fields = ['id', 'photo', 'is_online']
-
-class ListingUserSerializer(serializers.ModelSerializer):
-    user_personal_info = ListingUserPersonalInfoSerializer(many=False)
+class ListingMediaSerializer(serializers.ModelSerializer):
+    url = serializers.SerializerMethodField()
+    source = serializers.SerializerMethodField()
 
     class Meta:
-        model = User
-        fields = ['user_id', 'last_name', 'username', 'first_name', 'user_personal_info']
+        model = ListingMedia
+        fields = ("id", "media_type", "url", "source", "order")
+        read_only_fields = fields
 
+    def get_url(self, obj: ListingMedia) -> str | None:
+        if obj.external_url:
+            return obj.external_url
+        if not obj.file:
+            return None
+        request = self.context.get("request")
+        url = obj.file.url
+        if request:
+            return request.build_absolute_uri(url)
+        return url
 
-class GarageItemListingImagesSerializer(serializers.ModelSerializer):
-
-    class Meta:
-        model = GarageItemImages
-        fields = ['id', 'garage_item', 'image']
-
+    def get_source(self, obj: ListingMedia) -> str:
+        return "external" if obj.external_url else "upload"
 
 
 class ListingSerializer(serializers.ModelSerializer):
-    garage_item_images = serializers.SerializerMethodField()
-    item_owner = ListingUserSerializer(many=False)
+    owner = ListingOwnerSerializer(read_only=True)
+    media = ListingMediaSerializer(many=True, read_only=True)
+    tags = serializers.JSONField(required=False)
 
-
-
-    class Meta:
-        model = GarageItem
-        fields = ['id', 'item_id', 'item_name', 'bid_starts', 'ends_in', 'distance', 'is_premium', 'garage_item_images', 'item_owner', ]
-
-    def get_garage_item_images(self, obj):
-        first_image = obj.garage_item_images.first()
-        if first_image:
-            return GarageItemListingImagesSerializer(first_image).data
-        return None
-
-
-
-class GarageItemCommentsSerializer(serializers.ModelSerializer):
-    user = ReactionSerializer(many=False)
+    media_files = serializers.ListField(
+        child=serializers.FileField(),
+        write_only=True,
+        required=False,
+        allow_empty=True,
+    )
+    media_urls = serializers.JSONField(required=False)
+    remove_media_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        write_only=True,
+        required=False,
+        allow_empty=True,
+    )
 
     class Meta:
-        model = GarageItemComment
-        fields = ['id', 'comment', 'user', 'created_at']
+        model = Listing
+        fields = (
+            "id",
+            "owner",
+            "title",
+            "description",
+            "category",
+            "tags",
+            "estimated_value",
+            "is_trade_up_eligible",
+            "location",
+            "status",
+            "media",
+            "media_files",
+            "media_urls",
+            "remove_media_ids",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "owner", "media", "created_at", "updated_at")
 
-class GarageItemCanCounterWithSerializer(serializers.ModelSerializer):
+    def _normalize_tags(self, value) -> list[str]:
+        if value in (None, "", []):
+            return []
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise serializers.ValidationError(
+                    _("Tags must be provided as a JSON array of strings."), code="invalid"
+                ) from exc
+        if not isinstance(value, list):
+            raise serializers.ValidationError(
+                _("Tags must be provided as a list of strings."), code="invalid"
+            )
+        cleaned = []
+        for tag in value:
+            if not isinstance(tag, str):
+                raise serializers.ValidationError(
+                    _("Each tag must be a string."), code="invalid"
+                )
+            cleaned_tag = tag.strip()
+            if cleaned_tag:
+                cleaned.append(cleaned_tag)
+        return cleaned
 
-    class Meta:
-        model = CanCounterWith
-        fields = ['id', 'item_name']
+    def validate_tags(self, value):
+        return self._normalize_tags(value)
 
-class GarageItemCategoriesSerializer(serializers.ModelSerializer):
+    def validate_media_urls(self, value):
+        if value in (None, "", []):
+            return []
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise serializers.ValidationError(
+                    _("media_urls must be a JSON array of URLs."), code="invalid"
+                ) from exc
+        if not isinstance(value, list):
+            raise serializers.ValidationError(
+                _("media_urls must be provided as a list of URLs."), code="invalid"
+            )
+        validator = URLValidator()
+        cleaned = []
+        for url in value:
+            if not isinstance(url, str):
+                raise serializers.ValidationError(
+                    _("Each media URL must be a string."), code="invalid"
+                )
+            trimmed = url.strip()
+            try:
+                validator(trimmed)
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError(str(exc)) from exc
+            cleaned.append(trimmed)
+        return cleaned
 
-    class Meta:
-        model = GarageItemCategory
-        fields = ['id', 'category_name']
-class GarageItemVideosSerializer(serializers.ModelSerializer):
+    def validate(self, attrs):
+        media_files = attrs.get("media_files")
+        media_urls = attrs.get("media_urls")
+        if media_files is None and media_urls is None:
+            return attrs
+        files = media_files or []
+        urls = media_urls or []
+        if len(files) + len(urls) > 10:
+            raise serializers.ValidationError(
+                {"media": _("A maximum of 10 media items can be attached to a listing at once.")}
+            )
+        return attrs
 
-    class Meta:
-        model = GarageItemVideos
-        fields = ['id', 'garage_item', 'video']
+    def create(self, validated_data):
+        media_files = validated_data.pop("media_files", [])
+        media_urls = validated_data.pop("media_urls", [])
+        owner = validated_data.pop("owner", self.context["request"].user)
 
+        listing = Listing.objects.create(owner=owner, **validated_data)
+        self._create_media(listing, media_files, media_urls)
+        return listing
 
+    def update(self, instance: Listing, validated_data):
+        media_files = validated_data.pop("media_files", [])
+        media_urls = validated_data.pop("media_urls", [])
+        remove_media_ids = validated_data.pop("remove_media_ids", [])
 
-class GarageItemImagesSerializer(serializers.ModelSerializer):
+        validated_data.pop("owner", None)
 
-    class Meta:
-        model = GarageItemImages
-        fields = ['id', 'garage_item', 'image']
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
 
+        if remove_media_ids:
+            instance.media.filter(id__in=remove_media_ids).delete()
 
-class ListingDetailSerializer(serializers.ModelSerializer):
-    garage_item_images = GarageItemImagesSerializer(many=True)
-    garage_item_videos = GarageItemVideosSerializer(many=True)
-    garage_item_comments = GarageItemCommentsSerializer(many=True)
-    item_category = GarageItemCategoriesSerializer(many=True)
-    can_counter_item = GarageItemCanCounterWithSerializer(many=True)
-    reactions = ReactionSerializer(many=True)
+        self._create_media(instance, media_files, media_urls)
+        instance.refresh_from_db()
+        return instance
 
-    class Meta:
-        model = GarageItem
-        fields = ['item_id',
+    def _create_media(self, listing: Listing, media_files, media_urls):
+        order_start = listing.media.count()
+        for index, file_obj in enumerate(media_files or [], start=1):
+            media = ListingMedia(listing=listing, file=file_obj, order=order_start + index)
+            media.full_clean()
+            media.save()
+        for index, url in enumerate(media_urls or [], start=1):
+            media = ListingMedia(
+                listing=listing,
+                external_url=url,
+                order=order_start + len(media_files or []) + index,
+            )
+            media.full_clean()
+            media.save()
 
-                  'garage',
-                  'item_name',
-                  'description',
-                  'reason',
-                  'quality',
-
-                  'item_category',
-
-                  'is_premium',
-                  'is_listed',
-                  'hidden',
-                  'is_item',
-
-                  'bid_starts',
-                  'duration',
-                  'auto_relist',
-
-                  'reactions',
-
-                  'with_anything',
-                  'can_counter_item',
-
-                  'distance',
-                  'meet_up_loc',
-                  'meet_up_lat',
-                  'meet_up_lng',
-                  'add_generic_loc',
-
-                  'status',
-
-
-                  'garage_item_images',
-                  'garage_item_videos',
-
-                  'garage_item_comments',
-
-                  ]
-
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data.pop("media_files", None)
+        data.pop("media_urls", None)
+        data.pop("remove_media_ids", None)
+        return data

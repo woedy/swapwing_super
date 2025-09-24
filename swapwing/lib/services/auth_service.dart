@@ -1,4 +1,5 @@
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:swapwing/config/environment.dart';
 import 'package:swapwing/models/user.dart';
 import 'package:swapwing/services/sample_data.dart';
 
@@ -22,9 +23,12 @@ class AuthService {
   }
 
   static Future<void> login(String email, String password) async {
-    // Simulate login - in real app, this would authenticate with backend
-    await Future.delayed(Duration(seconds: 1));
-    
+    await _simulateNetwork();
+    // TODO: Replace mock auth with real API once backend endpoints are wired.
+    if (!EnvironmentConfig.useMockData) {
+      // Temporary fallback keeps staging usable until live auth is available.
+    }
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_isLoggedInKey, true);
     await prefs.setString(_userIdKey, SampleData.currentUser.id);
@@ -33,8 +37,11 @@ class AuthService {
   }
 
   static Future<void> loginWithGoogle() async {
-    await Future.delayed(Duration(seconds: 1));
-    
+    await _simulateNetwork();
+    if (!EnvironmentConfig.useMockData) {
+      // TODO: Replace with real Google OAuth once backend integration lands.
+    }
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_isLoggedInKey, true);
     await prefs.setString(_userIdKey, SampleData.currentUser.id);
@@ -43,8 +50,11 @@ class AuthService {
   }
 
   static Future<void> signUp(String email, String password, String username) async {
-    await Future.delayed(Duration(seconds: 1));
-    
+    await _simulateNetwork();
+    if (!EnvironmentConfig.useMockData) {
+      // TODO: Call signup endpoint and handle verification state.
+    }
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_isLoggedInKey, true);
     await prefs.setString(_userIdKey, SampleData.currentUser.id);
@@ -61,6 +71,10 @@ class AuthService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
     _currentUser = null;
+  }
+
+  static Future<void> _simulateNetwork() async {
+    await Future.delayed(Duration(seconds: 1));
   }
 
   static Future<void> initializeUser() async {

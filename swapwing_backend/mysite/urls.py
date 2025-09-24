@@ -17,10 +17,29 @@ Including another URLconf
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import include, path
+
+from drf_spectacular.views import (
+    SpectacularAPIView,
+    SpectacularRedocView,
+    SpectacularSwaggerView,
+)
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+
+    # API schema & docs
+    path("api/schema/", SpectacularAPIView.as_view(), name="api-schema"),
+    path(
+        "api/docs/",
+        SpectacularSwaggerView.as_view(url_name="api-schema"),
+        name="api-docs",
+    ),
+    path(
+        "api/docs/redoc/",
+        SpectacularRedocView.as_view(url_name="api-schema"),
+        name="api-docs-redoc",
+    ),
 
     # includes
     path("accounts/", include('accounts.urls', 'accounts')),
@@ -30,6 +49,9 @@ urlpatterns = [
     path('api/home_page/', include('home_page.api.urls', 'home_page_api')),
     path('api/garage/', include('garage.api.urls', 'garage_api')),
     path('api/listings/', include('listings.api.urls', 'listings_api')),
+    path('api/journeys/', include('journeys.api.urls', 'journeys_api')),
+    path('api/challenges/', include('challenges.api.urls', 'challenges_api')),
+    path('api/user-profile/', include('user_profile.api.urls', 'user_profile_api')),
 ]
 if settings.DEBUG:
     urlpatterns = urlpatterns + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

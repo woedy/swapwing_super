@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -20,22 +21,58 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-atq20^#ly*pvwe=+z)**$b@o0z$7a#)&*_l+vt8d8v#6v!te0y"
+SECRET_KEY = os.getenv(
+    "DJANGO_SECRET_KEY",
+    "django-insecure-atq20^#ly*pvwe=+z)**$b@o0z$7a#)&*_l+vt8d8v#6v!te0y",
+)
+
+
+def _env_bool(value, default=False):
+    if value is None:
+        return default
+    return value.lower() in {"1", "true", "yes", "on"}
+
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = _env_bool(os.getenv("DJANGO_DEBUG"), True)
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",")
+    if host.strip()
+]
+if not ALLOWED_HOSTS:
+    ALLOWED_HOSTS = ["*"]
 
 
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_HOST_USER = 'etornamasamoah@gmail.com'
-EMAIL_HOST_PASSWORD = 'yrmdporxqxmrvwam'
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-DEFAULT_FROM_EMAIL = 'SwapWing <samahatbarter@gmail.com>'
-BASE_URL = '0.0.0.0:80'
+EMAIL_BACKEND = os.getenv(
+    "DJANGO_EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend"
+)
+EMAIL_HOST = os.getenv("DJANGO_EMAIL_HOST", "smtp.gmail.com")
+EMAIL_HOST_USER = os.getenv("DJANGO_EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("DJANGO_EMAIL_HOST_PASSWORD", "")
+EMAIL_PORT = int(os.getenv("DJANGO_EMAIL_PORT", "587"))
+EMAIL_USE_TLS = _env_bool(os.getenv("DJANGO_EMAIL_USE_TLS"), True)
+DEFAULT_FROM_EMAIL = os.getenv("DJANGO_DEFAULT_FROM_EMAIL", "SwapWing <no-reply@swapwing.app>")
+BASE_URL = os.getenv("SWAPWING_BASE_URL", "http://localhost:8000")
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "https://swapwing.app")
+EMAIL_VERIFICATION_URL = os.getenv(
+    "EMAIL_VERIFICATION_URL",
+    f"{FRONTEND_BASE_URL.rstrip('/')}/verify-email",
+)
+EMAIL_VERIFICATION_TOKEN_TTL_MINUTES = int(
+    os.getenv("EMAIL_VERIFICATION_TOKEN_TTL_MINUTES", "30")
+)
+EMAIL_VERIFICATION_CODE_LENGTH = int(
+    os.getenv("EMAIL_VERIFICATION_CODE_LENGTH", "6")
+)
+EMAIL_VERIFICATION_SUBJECT = os.getenv(
+    "EMAIL_VERIFICATION_SUBJECT", "Verify your SwapWing email"
+)
+SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", DEFAULT_FROM_EMAIL)
+EMAIL_VERIFICATION_RESEND_COOLDOWN_MINUTES = int(
+    os.getenv("EMAIL_VERIFICATION_RESEND_COOLDOWN_MINUTES", "1")
+)
 
 AUTH_USER_MODEL = 'accounts.User'
 
@@ -50,6 +87,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "drf_spectacular",
     'rest_framework',
     'rest_framework.authtoken',
 
@@ -60,11 +98,31 @@ INSTALLED_APPS = [
     "home_page",
     "garage",
     "listings",
+    "journeys",
+    "challenges",
     "all_activities",
 
     "trade_up_league",
     "tags"
 ]
+
+REST_FRAMEWORK = {
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "SwapWing API",
+    "DESCRIPTION": (
+        "Programmatic interface for the SwapWing marketplace, journeys, and challenge "
+        "experiences. The specification documents the authenticated trader flows as "
+        "well as public discovery endpoints exposed by the platform."
+    ),
+    "VERSION": "1.0.0",
+    "SCHEMA_PATH_PREFIX": r"/api",
+    "COMPONENT_SPLIT_REQUEST": True,
+    "SERVE_INCLUDE_SCHEMA": False,
+    "DISABLE_ERRORS_AND_WARNINGS": True,
+}
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -80,11 +138,13 @@ ROOT_URLCONF = "mysite.urls"
 
 ASGI_APPLICATION = "mysite.asgi.application"
 
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [("redis://redis:6379")],
+            "hosts": [(REDIS_URL)],
         },
     },
 }
@@ -113,16 +173,37 @@ WSGI_APPLICATION = "mysite.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+def _database_from_env():
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        return {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+
+    parsed = urlparse(database_url)
+    if parsed.scheme not in {"postgres", "postgresql"}:
+        raise ValueError("Unsupported database scheme in DATABASE_URL")
+
+    return {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": parsed.path.lstrip("/"),
+        "USER": parsed.username,
+        "PASSWORD": parsed.password,
+        "HOST": parsed.hostname,
+        "PORT": parsed.port or 5432,
     }
-}
 
 
-CELERY_BROKER_URL = "redis://redis:6379"
-CELERY_RESULT_BACKEND = "redis://redis:6379"
+DATABASES = {"default": _database_from_env()}
+
+
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_URL)
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", REDIS_URL)
+CELERY_TASK_ALWAYS_EAGER = _env_bool(os.getenv("CELERY_TASK_ALWAYS_EAGER"), False)
+CELERY_TASK_EAGER_PROPAGATES = _env_bool(
+    os.getenv("CELERY_TASK_EAGER_PROPAGATES"), False
+)
 
 
 
@@ -170,8 +251,33 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 STATIC_ROOT = os.path.join(BASE_DIR, "static_cdn", "static_root")
 
-MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, "static_cdn", 'media_root')
+MEDIA_URL = "/media/"
+MEDIA_ROOT = os.path.join(BASE_DIR, "static_cdn", "media_root")
+
+USE_S3_MEDIA_STORAGE = os.getenv("USE_S3_MEDIA_STORAGE", "false").lower() == "true"
+
+if USE_S3_MEDIA_STORAGE:
+    DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
+
+    AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
+    AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+    AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "")
+    AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "us-east-1")
+    AWS_S3_SIGNATURE_VERSION = os.getenv("AWS_S3_SIGNATURE_VERSION", "s3v4")
+    AWS_S3_ENDPOINT_URL = os.getenv("AWS_S3_ENDPOINT_URL")
+    AWS_S3_CUSTOM_DOMAIN = os.getenv("AWS_S3_CUSTOM_DOMAIN")
+    AWS_DEFAULT_ACL = "private"
+    AWS_QUERYSTRING_AUTH = os.getenv("AWS_QUERYSTRING_AUTH", "true").lower() == "true"
+    AWS_S3_FILE_OVERWRITE = False
+    AWS_S3_OBJECT_PARAMETERS = {"CacheControl": "max-age=86400"}
+
+    if AWS_S3_CUSTOM_DOMAIN:
+        MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/"
+    elif AWS_STORAGE_BUCKET_NAME:
+        MEDIA_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com/"
+
+    MEDIA_ROOT = None
+
 
 
 HOST_SCHEME = "http://"
@@ -182,5 +288,5 @@ HOST_SCHEME = "http://"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
-FCM_SERVER_KEY = 'AAAAxOQuav4:APA91bGO5BfxGqVOvfop7ZyrFW1RePVALmhotBv4VMk67KD_IP_9aJfLnBVYQmoJpJw3ho2sKBELLcnMRFhHRl-Ri312kySP7eOLcYJgI0XmyrNZ9CR9fu28bnZn7u5W53dV8Q-4W6oU'
+FCM_SERVER_KEY = os.getenv("FCM_SERVER_KEY", "")
 

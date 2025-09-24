@@ -1,36 +1,40 @@
-import os
-import random
+import uuid
+from pathlib import Path
 
 from django.conf import settings
 from django.db import models
 from django.db.models.signals import post_save
 
+from user_profile.validators import validate_avatar_file, validate_id_document
+
 User = settings.AUTH_USER_MODEL
 
-def get_file_ext(filepath):
-    base_name = os.path.basename(filepath)
-    name, ext = os.path.splitext(base_name)
-    return name, ext
+
+def _user_storage_identifier(instance) -> str:
+    user = getattr(instance, "user", None)
+    if not user:
+        return "anonymous"
+    return getattr(user, "user_id", None) or str(user.pk)
 
 
-def upload_image_path(instance, filename):
-    new_filename = random.randint(1, 3910209312)
-    name, ext = get_file_ext(filename)
-    final_filename = '{new_filename}{ext}'.format(new_filename=new_filename, ext=ext)
-    return "users/{new_filename}/{final_filename}".format(
-        new_filename=new_filename,
-        final_filename=final_filename
-    )
+def avatar_upload_to(instance, filename):
+    identifier = _user_storage_identifier(instance)
+    ext = Path(filename or "").suffix or ".jpg"
+    return f"users/{identifier}/avatars/{uuid.uuid4()}{ext}"
 
 
-def upload_id_card_path(instance, filename):
-    new_filename = random.randint(1, 3910209312)
-    name, ext = get_file_ext(filename)
-    final_filename = '{new_filename}{ext}'.format(new_filename=new_filename, ext=ext)
-    return "id_cards/{new_filename}/{final_filename}".format(
-        new_filename=new_filename,
-        final_filename=final_filename
-    )
+def id_document_upload_to(instance, filename):
+    identifier = _user_storage_identifier(instance)
+    ext = Path(filename or "").suffix or ".pdf"
+    return f"users/{identifier}/identity/{uuid.uuid4()}{ext}"
+
+
+def upload_image_path(instance, filename):  # Backwards compatibility for migrations
+    return avatar_upload_to(instance, filename)
+
+
+def upload_id_card_path(instance, filename):  # Backwards compatibility for migrations
+    return id_document_upload_to(instance, filename)
 
 def get_default_profile_image():
     return "defaults/default_profile_image.png"
@@ -72,9 +76,20 @@ class SocialMedia(models.Model):
 class PersonalInfo(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='user_personal_info')
     gender = models.CharField(max_length=100, choices=GENDER_CHOICES, blank=True, null=True)
-    photo = models.ImageField(upload_to=upload_image_path, null=True, blank=True, default=get_default_profile_image)
+    photo = models.ImageField(
+        upload_to=avatar_upload_to,
+        null=True,
+        blank=True,
+        default=get_default_profile_image,
+        validators=[validate_avatar_file],
+    )
 
-    id_card_image = models.ImageField(upload_to=upload_id_card_path, null=True, blank=True)
+    id_card_image = models.FileField(
+        upload_to=id_document_upload_to,
+        null=True,
+        blank=True,
+        validators=[validate_id_document],
+    )
     id_type = models.CharField(max_length=255, null=True, blank=True)
     id_number = models.CharField(max_length=255, null=True, blank=True)
 
@@ -133,7 +148,13 @@ class Wallet(models.Model):
 class AdminInfo(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='admin_info')
     gender = models.CharField(max_length=100, choices=GENDER_CHOICES, blank=True, null=True)
-    photo = models.ImageField(upload_to=upload_image_path, null=True, blank=True, default=get_default_profile_image)
+    photo = models.ImageField(
+        upload_to=avatar_upload_to,
+        null=True,
+        blank=True,
+        default=get_default_profile_image,
+        validators=[validate_avatar_file],
+    )
     dob = models.DateTimeField(null=True, blank=True)
     marital_status = models.BooleanField(default=False, null=True, blank=True)
     phone = models.CharField(max_length=255, null=True, blank=True)
