@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:swapwing/services/auth_service.dart';
 import 'package:swapwing/services/sample_data.dart';
 import 'package:swapwing/screens/auth/welcome_screen.dart';
+import 'package:swapwing/screens/settings/feedback_screen.dart';
+import 'package:swapwing/screens/settings/notification_settings_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -205,10 +207,12 @@ class ProfileScreen extends StatelessWidget {
                 _ProfileMenuItem(
                   icon: Icons.notifications,
                   title: 'Notifications',
-                  subtitle: 'Manage your alerts',
+                  subtitle: 'Manage push and email alerts',
                   onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Notification settings coming soon!')),
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => const NotificationSettingsScreen(),
+                      ),
                     );
                   },
                 ),
@@ -223,12 +227,14 @@ class ProfileScreen extends StatelessWidget {
                   },
                 ),
                 _ProfileMenuItem(
-                  icon: Icons.help,
-                  title: 'Help & Support',
-                  subtitle: 'Get help when you need it',
+                  icon: Icons.feedback_outlined,
+                  title: 'Feedback & Support',
+                  subtitle: 'Share ideas or report an issue',
                   onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Help center coming soon!')),
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => const FeedbackScreen(),
+                      ),
                     );
                   },
                 ),
@@ -296,7 +302,21 @@ class ProfileScreen extends StatelessWidget {
                 );
               },
             ),
-            
+
+            ListTile(
+              leading: Icon(Icons.feedback, color: Theme.of(context).colorScheme.primary),
+              title: Text('Send Feedback'),
+              subtitle: Text('Share ideas or report an issue'),
+              onTap: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => const FeedbackScreen(),
+                  ),
+                );
+              },
+            ),
+
             SizedBox(height: 24),
           ],
         ),

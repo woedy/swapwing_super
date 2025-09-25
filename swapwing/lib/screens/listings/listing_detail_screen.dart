@@ -1,6 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:swapwing/models/listing.dart';
-import 'package:swapwing/services/sample_data.dart';
+import 'package:swapwing/services/analytics_service.dart';
 
 class ListingDetailScreen extends StatefulWidget {
   final SwapListing listing;
@@ -16,18 +18,35 @@ class ListingDetailScreen extends StatefulWidget {
 
 class _ListingDetailScreenState extends State<ListingDetailScreen> {
   int _currentImageIndex = 0;
+  late final AnalyticsService _analytics;
+
+  @override
+  void initState() {
+    super.initState();
+    _analytics = AnalyticsService.instance;
+    _analytics.logEvent(
+      'listing_detail_viewed',
+      properties: {
+        'listing_id': widget.listing.id,
+        'category': widget.listing.category.name,
+        'owner_id': widget.listing.owner?.id,
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final owner = SampleData.sampleUsers.firstWhere(
-      (user) => user.id == widget.listing.ownerId,
-      orElse: () => SampleData.currentUser,
-    );
+    final images = widget.listing.imageUrls;
+    final owner = widget.listing.owner;
+    final ownerName = owner?.displayName ?? 'SwapWing Trader';
+    final ownerInitials = owner?.initials ?? 'S';
+    final ownerEmail = owner?.email;
+    final ownerAvatar = owner?.avatarUrl;
+    final estimatedValue = widget.listing.estimatedValue;
 
     return Scaffold(
       body: CustomScrollView(
         slivers: [
-          // Image carousel app bar
           SliverAppBar(
             expandedHeight: 300,
             pinned: true,
@@ -53,6 +72,10 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                 child: IconButton(
                   icon: Icon(Icons.share, color: Colors.white),
                   onPressed: () {
+                    _analytics.logEvent(
+                      'listing_share_tapped',
+                      properties: {'listing_id': widget.listing.id},
+                    );
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text('Share feature coming soon!')),
                     );
@@ -61,50 +84,27 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
               ),
             ],
             flexibleSpace: FlexibleSpaceBar(
-              background: widget.listing.imageUrls.isNotEmpty
+              background: images.isNotEmpty
                   ? PageView.builder(
-                      itemCount: widget.listing.imageUrls.length,
+                      itemCount: images.length,
                       onPageChanged: (index) => setState(() => _currentImageIndex = index),
                       itemBuilder: (context, index) {
-                        return Image.network(
-                          widget.listing.imageUrls[index],
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
-                              color: Theme.of(context).colorScheme.surfaceContainer,
-                              child: Icon(
-                                Icons.image,
-                                size: 64,
-                                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.4),
-                              ),
-                            );
-                          },
-                        );
+                        return _buildListingImage(context, images[index]);
                       },
                     )
-                  : Container(
-                      color: Theme.of(context).colorScheme.surfaceContainer,
-                      child: Icon(
-                        Icons.image,
-                        size: 64,
-                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.4),
-                      ),
-                    ),
+                  : _buildImageFallback(context),
             ),
           ),
-          
-          // Content
           SliverToBoxAdapter(
             child: Padding(
               padding: EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Image indicators
-                  if (widget.listing.imageUrls.length > 1)
+                  if (images.length > 1)
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
-                      children: widget.listing.imageUrls.asMap().entries.map((entry) {
+                      children: images.asMap().entries.map((entry) {
                         return Container(
                           width: 8,
                           height: 8,
@@ -118,19 +118,16 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                         );
                       }).toList(),
                     ),
-                  
                   SizedBox(height: 24),
-                  
-                  // Title and badges
                   Row(
                     children: [
                       Expanded(
                         child: Text(
                           widget.listing.title,
                           style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.bold,
-                            color: Theme.of(context).colorScheme.onSurface,
-                          ),
+                                fontWeight: FontWeight.bold,
+                                color: Theme.of(context).colorScheme.onSurface,
+                              ),
                         ),
                       ),
                       if (widget.listing.isTradeUpEligible)
@@ -148,86 +145,97 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                               Text(
                                 'Trade-Up',
                                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                               ),
                             ],
                           ),
                         ),
                     ],
                   ),
-                  
                   SizedBox(height: 8),
-                  
-                  // Value
-                  Container(
-                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      'Estimated Value: \$${widget.listing.estimatedValue.toInt()}',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onPrimaryContainer,
-                        fontWeight: FontWeight.w600,
+                  if (estimatedValue != null)
+                    Container(
+                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        'Estimated Value: \$${estimatedValue.toInt()}',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              color: Theme.of(context).colorScheme.onPrimaryContainer,
+                              fontWeight: FontWeight.w600,
+                            ),
                       ),
                     ),
-                  ),
-                  
+                  if (widget.listing.location != null) ...[
+                    SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Icon(Icons.location_on_outlined, size: 18, color: Theme.of(context).colorScheme.primary),
+                        SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            widget.listing.location!,
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                                ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                   SizedBox(height: 20),
-                  
-                  // Description
                   Text(
                     'Description',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
                   ),
                   SizedBox(height: 8),
                   Text(
                     widget.listing.description,
                     style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.8),
-                      height: 1.5,
-                    ),
+                          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.8),
+                          height: 1.5,
+                        ),
                   ),
-                  
                   SizedBox(height: 20),
-                  
-                  // Tags
                   if (widget.listing.tags.isNotEmpty) ...[
                     Text(
                       'Tags',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
+                            fontWeight: FontWeight.w600,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
                     ),
                     SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
-                      children: widget.listing.tags.map((tag) => Container(
-                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.surfaceContainer,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Text(
-                          '#$tag',
-                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-                          ),
-                        ),
-                      )).toList(),
+                      children: widget.listing.tags
+                          .map(
+                            (tag) => Container(
+                              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.surfaceContainer,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Text(
+                                '#$tag',
+                                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                                    ),
+                              ),
+                            ),
+                          )
+                          .toList(),
                     ),
                     SizedBox(height: 20),
                   ],
-                  
-                  // Owner info card
                   Container(
                     padding: EdgeInsets.all(16),
                     decoration: BoxDecoration(
@@ -238,12 +246,16 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                       children: [
                         CircleAvatar(
                           radius: 24,
-                          backgroundImage: owner.profileImageUrl != null 
-                              ? NetworkImage(owner.profileImageUrl!)
-                              : null,
+                          backgroundImage: ownerAvatar != null ? NetworkImage(ownerAvatar) : null,
                           backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-                          child: owner.profileImageUrl == null 
-                              ? Icon(Icons.person, color: Theme.of(context).colorScheme.primary)
+                          child: ownerAvatar == null
+                              ? Text(
+                                  ownerInitials,
+                                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                        color: Theme.of(context).colorScheme.primary,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                )
                               : null,
                         ),
                         SizedBox(width: 12),
@@ -251,41 +263,27 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Row(
-                                children: [
-                                  Text(
-                                    owner.username,
-                                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              Text(
+                                ownerName,
+                                style: Theme.of(context).textTheme.titleSmall?.copyWith(
                                       fontWeight: FontWeight.w600,
                                       color: Theme.of(context).colorScheme.onSurface,
                                     ),
-                                  ),
-                                  if (owner.isVerified) ...[
-                                    SizedBox(width: 4),
-                                    Icon(
-                                      Icons.verified,
-                                      size: 16,
-                                      color: Theme.of(context).colorScheme.primary,
-                                    ),
-                                  ],
-                                ],
                               ),
-                              Row(
-                                children: [
-                                  Icon(
-                                    Icons.star,
-                                    size: 14,
-                                    color: Colors.amber,
-                                  ),
-                                  SizedBox(width: 4),
-                                  Text(
-                                    '${owner.trustScore} • ${owner.totalTrades} trades',
-                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                              if (ownerEmail != null && ownerEmail.isNotEmpty)
+                                Text(
+                                  ownerEmail,
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                                      ),
+                                )
+                              else
+                                Text(
+                                  'Trusted SwapWing trader',
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                                      ),
+                                ),
                             ],
                           ),
                         ),
@@ -303,10 +301,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                       ],
                     ),
                   ),
-                  
                   SizedBox(height: 24),
-                  
-                  // AI suggestions
                   Container(
                     padding: EdgeInsets.all(16),
                     decoration: BoxDecoration(
@@ -331,9 +326,9 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                             Text(
                               'AI Suggestions',
                               style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                                fontWeight: FontWeight.w600,
-                                color: Theme.of(context).colorScheme.onSurface,
-                              ),
+                                    fontWeight: FontWeight.w600,
+                                    color: Theme.of(context).colorScheme.onSurface,
+                                  ),
                             ),
                           ],
                         ),
@@ -341,29 +336,26 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                         Text(
                           'Items that would make great trades for this listing:',
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-                          ),
+                                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                              ),
                         ),
                         SizedBox(height: 8),
                         Text(
                           '• Photography equipment\n• Design software\n• Art supplies',
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.8),
-                          ),
+                                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.8),
+                              ),
                         ),
                       ],
                     ),
                   ),
-                  
-                  SizedBox(height: 120), // Bottom padding for buttons
+                  SizedBox(height: 120),
                 ],
               ),
             ),
           ),
         ],
       ),
-      
-      // Bottom action buttons
       bottomNavigationBar: Container(
         padding: EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -398,34 +390,31 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                   label: Text(
                     'Message',
                     style: TextStyle(
-                      color: Theme.of(context).colorScheme.primary,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
               ),
-              SizedBox(width: 16),
+              SizedBox(width: 12),
               Expanded(
                 child: ElevatedButton.icon(
                   onPressed: () {
-                    _showTradeProposalBottomSheet(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Offer flow coming soon!')),
+                    );
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Theme.of(context).colorScheme.primary,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
                     ),
                     padding: EdgeInsets.symmetric(vertical: 16),
                   ),
-                  icon: Icon(Icons.swap_horiz, color: Colors.white),
+                  icon: Icon(Icons.swap_horiz),
                   label: Text(
-                    'Propose Trade',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    'Make an Offer',
+                    style: TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ),
               ),
@@ -436,138 +425,51 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     );
   }
 
-  void _showTradeProposalBottomSheet(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+  Widget _buildImageFallback(BuildContext context) {
+    return Container(
+      color: Theme.of(context).colorScheme.surfaceContainer,
+      child: Icon(
+        Icons.image,
+        size: 64,
+        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.4),
       ),
-      isScrollControlled: true,
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
-        maxChildSize: 0.9,
-        minChildSize: 0.4,
-        builder: (context, scrollController) => Container(
-          padding: EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Handle bar
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.outline.withOpacity(0.3),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              
-              SizedBox(height: 24),
-              
-              Text(
-                'Propose a Trade',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
-              ),
-              
-              SizedBox(height: 16),
-              
-              Text(
-                'Select items from your listings to offer in exchange:',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-                ),
-              ),
-              
-              SizedBox(height: 20),
-              
-              // My items placeholder
-              Expanded(
-                child: Container(
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceContainer,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: Theme.of(context).colorScheme.outline.withOpacity(0.3),
-                      style: BorderStyle.solid,
-                    ),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.inventory_2_outlined,
-                        size: 48,
-                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.4),
-                      ),
-                      SizedBox(height: 16),
-                      Text(
-                        'Your listings will appear here',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-                        ),
-                      ),
-                      SizedBox(height: 8),
-                      TextButton(
-                        onPressed: () {
-                          Navigator.pop(context);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Create your first listing to start trading!')),
-                          );
-                        },
-                        child: Text(
-                          'Create a Listing',
-                          style: TextStyle(color: Theme.of(context).colorScheme.primary),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              
-              SizedBox(height: 24),
-              
-              // Send proposal button
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Trade proposal sent!'),
-                        backgroundColor: Theme.of(context).colorScheme.primary,
-                      ),
-                    );
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.primary,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                  child: Text(
-                    'Send Trade Proposal',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    );
+  }
+
+  Widget _buildListingImage(BuildContext context, String imageUrl) {
+    final uri = Uri.tryParse(imageUrl);
+    if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
+      return Image.network(
+        imageUrl,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => _buildImageFallback(context),
+      );
+    }
+
+    if (uri != null && uri.scheme == 'file') {
+      final file = File(uri.toFilePath());
+      if (file.existsSync()) {
+        return Image.file(
+          file,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => _buildImageFallback(context),
+        );
+      }
+    }
+
+    final file = File(imageUrl);
+    if (file.existsSync()) {
+      return Image.file(
+        file,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => _buildImageFallback(context),
+      );
+    }
+
+    return Image.network(
+      imageUrl,
+      fit: BoxFit.cover,
+      errorBuilder: (context, error, stackTrace) => _buildImageFallback(context),
     );
   }
 }

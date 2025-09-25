@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:swapwing/models/trade_journey.dart';
 import 'package:swapwing/models/challenge.dart';
+import 'package:swapwing/services/analytics_service.dart';
+import 'package:swapwing/services/challenge_service.dart';
 import 'package:swapwing/services/sample_data.dart';
 import 'package:swapwing/screens/social/journey_detail_screen.dart';
 import 'package:swapwing/screens/social/challenge_detail_screen.dart';
@@ -13,28 +17,56 @@ class SocialDiscoveryScreen extends StatefulWidget {
   State<SocialDiscoveryScreen> createState() => _SocialDiscoveryScreenState();
 }
 
-class _SocialDiscoveryScreenState extends State<SocialDiscoveryScreen> with SingleTickerProviderStateMixin {
+class _SocialDiscoveryScreenState extends State<SocialDiscoveryScreen>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  late final ChallengeService _challengeService;
+  final AnalyticsService _analytics = AnalyticsService.instance;
+  StreamSubscription<List<Challenge>>? _challengeSubscription;
   List<TradeJourney> _journeys = [];
   List<Challenge> _challenges = [];
+  bool _isLoadingChallenges = true;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _challengeService = ChallengeService();
     _loadData();
+    _challengeSubscription = _challengeService.watchChallenges().listen((list) {
+      if (!mounted) return;
+      setState(() {
+        _challenges = list;
+        _isLoadingChallenges = false;
+      });
+    });
+    _analytics.logEvent('social_discovery_opened');
   }
 
   void _loadData() {
     setState(() {
       _journeys = SampleData.getSocialJourneys();
-      _challenges = SampleData.getSampleChallenges();
+      _isLoadingChallenges = true;
     });
+    _analytics.logEvent(
+      'social_discovery_refreshed',
+      properties: {'source': 'initial_load'},
+    );
+    _challengeService.fetchChallenges();
+  }
+
+  Future<List<Challenge>> _refreshChallenges() async {
+    _analytics.logEvent(
+      'social_discovery_refreshed',
+      properties: {'source': 'pull_to_refresh'},
+    );
+    return _challengeService.fetchChallenges(refresh: true);
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _challengeSubscription?.cancel();
     super.dispose();
   }
 
@@ -67,7 +99,11 @@ class _SocialDiscoveryScreenState extends State<SocialDiscoveryScreen> with Sing
         controller: _tabController,
         children: [
           JourneysGridView(journeys: _journeys),
-          ChallengesGridView(challenges: _challenges),
+          ChallengesGridView(
+            challenges: _challenges,
+            isLoading: _isLoadingChallenges,
+            onRefresh: _refreshChallenges,
+          ),
         ],
       ),
     );
@@ -104,6 +140,13 @@ class JourneysGridView extends StatelessWidget {
 
   void _openJourneyFeed(BuildContext context, TradeJourney journey, List<TradeJourney> allJourneys) {
     final startIndex = allJourneys.indexOf(journey);
+    AnalyticsService.instance.logEvent(
+      'journey_social_feed_opened',
+      properties: {
+        'journey_id': journey.id,
+        'position': startIndex,
+      },
+    );
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -118,46 +161,112 @@ class JourneysGridView extends StatelessWidget {
 
 class ChallengesGridView extends StatelessWidget {
   final List<Challenge> challenges;
+  final bool isLoading;
+  final Future<List<Challenge>> Function()? onRefresh;
 
-  const ChallengesGridView({super.key, required this.challenges});
+  const ChallengesGridView({
+    super.key,
+    required this.challenges,
+    this.isLoading = false,
+    this.onRefresh,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    final content = _buildContent(context);
+    if (onRefresh == null) {
+      return content;
+    }
+
+    return RefreshIndicator(
+      onRefresh: () async {
+        await onRefresh?.call();
+      },
+      child: content,
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
+    if (isLoading) {
+      return ListView(
+        padding: EdgeInsets.symmetric(vertical: 80),
+        physics: AlwaysScrollableScrollPhysics(),
         children: [
-          Text(
-            'Active Challenges',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          SizedBox(height: 16),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: NeverScrollableScrollPhysics(),
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 1,
-              mainAxisSpacing: 16,
-              childAspectRatio: 2.5,
-            ),
-            itemCount: challenges.length,
-            itemBuilder: (context, index) {
-              final challenge = challenges[index];
-              return ChallengeCard(
-                challenge: challenge,
-                onTap: () => _openChallengeDetail(context, challenge),
-              );
-            },
+          Center(child: CircularProgressIndicator()),
+        ],
+      );
+    }
+
+    if (challenges.isEmpty) {
+      return ListView(
+        padding: EdgeInsets.symmetric(vertical: 80, horizontal: 32),
+        physics: AlwaysScrollableScrollPhysics(),
+        children: [
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.emoji_events_outlined,
+                size: 48,
+                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.4),
+              ),
+              SizedBox(height: 16),
+              Text(
+                'Challenges are coming soon!',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              SizedBox(height: 8),
+              Text(
+                'Check back shortly as the community kicks off new trading quests.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withOpacity(0.6),
+                    ),
+              ),
+            ],
           ),
         ],
-      ),
+      );
+    }
+
+    return ListView(
+      padding: EdgeInsets.all(16),
+      physics: AlwaysScrollableScrollPhysics(),
+      children: [
+        Text(
+          'Active Challenges',
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+        ),
+        SizedBox(height: 16),
+        ...challenges.map(
+          (challenge) => Padding(
+            padding: EdgeInsets.only(bottom: 16),
+            child: ChallengeCard(
+              challenge: challenge,
+              onTap: () => _openChallengeDetail(context, challenge),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
   void _openChallengeDetail(BuildContext context, Challenge challenge) {
+    AnalyticsService.instance.logEvent(
+      'challenge_card_opened',
+      properties: {
+        'challenge_id': challenge.id,
+        'status': challenge.status.name,
+      },
+    );
     Navigator.push(
       context,
       MaterialPageRoute(

@@ -5,6 +5,7 @@ import 'package:swapwing/screens/listings/create_listing_screen.dart';
 import 'package:swapwing/screens/journeys/journeys_screen.dart';
 import 'package:swapwing/screens/social/social_discovery_screen.dart';
 import 'package:swapwing/screens/profile/profile_screen.dart';
+import 'package:swapwing/services/push_notification_service.dart';
 
 class MainNavigation extends StatefulWidget {
   const MainNavigation({super.key});
@@ -15,7 +16,7 @@ class MainNavigation extends StatefulWidget {
 
 class _MainNavigationState extends State<MainNavigation> {
   int _currentIndex = 0;
-  
+
   final List<Widget> _screens = [
     HomeScreen(),
     SearchScreen(),
@@ -57,6 +58,12 @@ class _MainNavigationState extends State<MainNavigation> {
       label: 'Profile',
     ),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    PushNotificationService.initialize();
+  }
 
   @override
   Widget build(BuildContext context) {

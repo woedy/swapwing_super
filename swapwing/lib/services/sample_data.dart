@@ -1,8 +1,9 @@
-import 'package:swapwing/models/user.dart';
 import 'package:swapwing/models/listing.dart';
+import 'package:swapwing/models/journey_draft.dart';
 import 'package:swapwing/models/trade_journey.dart';
 import 'package:swapwing/models/chat_message.dart';
 import 'package:swapwing/models/challenge.dart';
+import 'package:swapwing/models/user.dart';
 
 class SampleData {
   static final SwapWingUser currentUser = SwapWingUser(
@@ -20,10 +21,34 @@ class SampleData {
     createdAt: DateTime.now().subtract(Duration(days: 90)),
   );
 
+  static ListingOwner _ownerFor(String userId) {
+    final users = sampleUsers;
+    final match = users.firstWhere(
+      (user) => user.id == userId,
+      orElse: () => currentUser,
+    );
+    return ListingOwner.fromUser(match);
+  }
+
   static final List<SwapListing> sampleListings = [
+    SwapListing(
+      id: 'listing_my_001',
+      ownerId: currentUser.id,
+      owner: ListingOwner.fromUser(currentUser),
+      title: 'Starter Acoustic Guitar',
+      description: 'Six-string acoustic guitar with warm tone. Looking to trade up for studio equipment.',
+      imageUrls: ['https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=400&h=300&fit=crop'],
+      category: ListingCategory.goods,
+      tags: ['music', 'guitar', 'trade-up'],
+      estimatedValue: 220.0,
+      isTradeUpEligible: true,
+      location: 'San Francisco, CA',
+      createdAt: DateTime.now().subtract(Duration(days: 1)),
+    ),
     SwapListing(
       id: 'listing_001',
       ownerId: 'user_002',
+      owner: _ownerFor('user_002'),
       title: 'Vintage Polaroid Camera',
       description: 'Classic instant camera in excellent condition. Perfect for photography enthusiasts!',
       imageUrls: ['https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=400&h=300&fit=crop'],
@@ -37,6 +62,7 @@ class SampleData {
     SwapListing(
       id: 'listing_002',
       ownerId: 'user_003',
+      owner: _ownerFor('user_003'),
       title: 'Designer Leather Jacket',
       description: 'Premium leather jacket, size Medium. Barely worn, from a smoke-free home.',
       imageUrls: ['https://images.unsplash.com/photo-1551028719-00167b16eac5?w=400&h=300&fit=crop'],
@@ -50,6 +76,7 @@ class SampleData {
     SwapListing(
       id: 'listing_003',
       ownerId: 'user_004',
+      owner: _ownerFor('user_004'),
       title: 'Professional Guitar Lessons',
       description: 'Learn guitar from a certified instructor. 4 session package available for trade!',
       imageUrls: ['https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400&h=300&fit=crop'],
@@ -62,6 +89,7 @@ class SampleData {
     SwapListing(
       id: 'listing_004',
       ownerId: 'user_005',
+      owner: _ownerFor('user_005'),
       title: 'Gaming Mechanical Keyboard',
       description: 'RGB backlit mechanical keyboard with blue switches. Great for gaming and typing.',
       imageUrls: ['https://images.unsplash.com/photo-1541140532154-b024d705b90a?w=400&h=300&fit=crop'],
@@ -75,6 +103,7 @@ class SampleData {
     SwapListing(
       id: 'listing_005',
       ownerId: 'user_006',
+      owner: _ownerFor('user_006'),
       title: 'Yoga Classes Package',
       description: '10-class package at premium studio. Perfect for wellness enthusiasts!',
       imageUrls: ['https://images.unsplash.com/photo-1506629905607-24b420c1b21c?w=400&h=300&fit=crop'],
@@ -85,6 +114,24 @@ class SampleData {
       createdAt: DateTime.now().subtract(Duration(hours: 6)),
     ),
   ];
+
+  static void addListing(SwapListing listing) {
+    sampleListings.removeWhere((existing) => existing.id == listing.id);
+    sampleListings.insert(0, listing);
+  }
+
+  static SwapListing? findListingById(String id) {
+    if (id.isEmpty) return null;
+    try {
+      return sampleListings.firstWhere((listing) => listing.id == id);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static List<SwapListing> getListingsForUser(String userId) {
+    return sampleListings.where((listing) => listing.ownerId == userId).toList();
+  }
 
   static final List<TradeJourney> sampleJourneys = [
     TradeJourney(
@@ -347,9 +394,36 @@ class SampleData {
     
     return journeys;
   }
-  
+
   static List<SwapListing> getListings() {
     return sampleListings;
+  }
+
+  static void addJourney(TradeJourney journey) {
+    sampleJourneys.removeWhere((existing) => existing.id == journey.id);
+    sampleJourneys.insert(0, journey);
+  }
+
+  static List<TradeJourney> getJourneysForUser(String userId) {
+    return sampleJourneys.where((journey) => journey.userId == userId).toList();
+  }
+
+  static final List<JourneyDraft> _journeyDrafts = [];
+
+  static List<JourneyDraft> getJourneyDrafts() {
+    final drafts = List<JourneyDraft>.from(_journeyDrafts);
+    drafts.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return drafts;
+  }
+
+  static void saveJourneyDraft(JourneyDraft draft) {
+    _journeyDrafts.removeWhere((existing) => existing.id == draft.id);
+    _journeyDrafts.add(draft);
+    _journeyDrafts.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+  }
+
+  static void removeJourneyDraft(String id) {
+    _journeyDrafts.removeWhere((draft) => draft.id == id);
   }
 
   static List<SwapWingUser> get sampleUsers => [
@@ -400,6 +474,18 @@ class SampleData {
       totalTrades: 19,
       isVerified: true,
       createdAt: DateTime.now().subtract(Duration(days: 150)),
+    ),
+    SwapWingUser(
+      id: 'user_006',
+      username: 'wellness_guru',
+      email: 'wellness@example.com',
+      profileImageUrl: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&h=150&fit=crop&crop=face',
+      bio: 'Helping the community stay mindful and active 🧘',
+      location: 'San Jose, CA',
+      trustScore: 4.5,
+      totalTrades: 11,
+      isVerified: true,
+      createdAt: DateTime.now().subtract(Duration(days: 80)),
     ),
   ];
 
@@ -526,6 +612,18 @@ class SampleData {
         tags: ['photography', 'vintage', 'camera', 'collection'],
         createdBy: 'SwapWing',
         status: ChallengeStatus.active,
+        currentUserProgress: ChallengeParticipant(
+          userId: currentUser.id,
+          userName: currentUser.username,
+          avatarUrl: currentUser.profileImageUrl ??
+              'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
+          currentValue: 540.0,
+          rank: 4,
+          journeyId: 'journey_camera_self',
+          tradesCompleted: 3,
+          joinedAt: DateTime.now().subtract(Duration(days: 12)),
+          lastTradeAt: DateTime.now().subtract(Duration(hours: 12)),
+        ),
       ),
 
       Challenge(
@@ -594,5 +692,82 @@ class SampleData {
         status: ChallengeStatus.ended,
       ),
     ];
+  }
+
+  static Map<String, List<ChallengeProgressUpdate>> getChallengeUpdates() {
+    final now = DateTime.now();
+    return {
+      'challenge_001': [
+        ChallengeProgressUpdate(
+          id: 'update_001',
+          challengeId: 'challenge_001',
+          userId: 'user_002',
+          userName: 'photo_enthusiast',
+          avatarUrl:
+              'https://images.unsplash.com/photo-1494790108755-2616b612b05b?w=150&h=150&fit=crop&crop=face',
+          previousValue: 2100.0,
+          newValue: 2340.0,
+          tradesCompleted: 12,
+          message: 'Closed a trade for a refurbished DSLR kit worth \$2340.',
+          timestamp: now.subtract(Duration(hours: 6)),
+        ),
+        ChallengeProgressUpdate(
+          id: 'update_002',
+          challengeId: 'challenge_001',
+          userId: 'user_003',
+          userName: 'fashion_forward',
+          avatarUrl:
+              'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=150&h=150&fit=crop&crop=face',
+          previousValue: 1700.0,
+          newValue: 1890.0,
+          tradesCompleted: 9,
+          message: 'Swapped couture jacket set for a limited edition sneaker drop.',
+          timestamp: now.subtract(Duration(hours: 18)),
+        ),
+      ],
+      'challenge_002': [
+        ChallengeProgressUpdate(
+          id: 'update_003',
+          challengeId: 'challenge_002',
+          userId: currentUser.id,
+          userName: currentUser.username,
+          avatarUrl: currentUser.profileImageUrl ??
+              'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
+          previousValue: 420.0,
+          newValue: 540.0,
+          tradesCompleted: 3,
+          message: 'Documented a swap for a vintage Canon AE-1 body in mint condition.',
+          timestamp: now.subtract(Duration(hours: 12)),
+        ),
+        ChallengeProgressUpdate(
+          id: 'update_004',
+          challengeId: 'challenge_002',
+          userId: 'user_005',
+          userName: 'book_wanderer',
+          avatarUrl:
+              'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
+          previousValue: 720.0,
+          newValue: 890.0,
+          tradesCompleted: 4,
+          message: 'Secured a darkroom equipment bundle from a local studio closeout.',
+          timestamp: now.subtract(Duration(hours: 3)),
+        ),
+      ],
+      'challenge_004': [
+        ChallengeProgressUpdate(
+          id: 'update_005',
+          challengeId: 'challenge_004',
+          userId: 'user_003',
+          userName: 'fashion_forward',
+          avatarUrl:
+              'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=150&h=150&fit=crop&crop=face',
+          previousValue: 1500.0,
+          newValue: 1800.0,
+          tradesCompleted: 11,
+          message: 'Final trade locked in a gallery-quality lighting rig to complete the studio.',
+          timestamp: now.subtract(Duration(days: 5)),
+        ),
+      ],
+    };
   }
 }

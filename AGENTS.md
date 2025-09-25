@@ -81,12 +81,12 @@ Use this as a living roadmap. Check items off as they complete, and append new i
 
 ### Frontend (Flutter)
 - [x] Replace sample auth with live API integration and secure token storage.
-- [ ] Wire listings Home/Search to backend with skeleton loaders and error states.
-- [ ] Build create-listing wizard with media picker/upload feedback.
-- [ ] Implement journey composer with drafts and previews.
-- [ ] Add challenge participation flows with real-time updates.
-- [ ] Integrate analytics/events instrumentation.
-- [ ] Add in-app feedback module and push notifications.
+- [x] Wire listings Home/Search to backend with skeleton loaders and error states.
+- [x] Build create-listing wizard with media picker/upload feedback.
+- [x] Implement journey composer with drafts and previews.
+- [x] Add challenge participation flows with real-time updates.
+- [x] Integrate analytics/events instrumentation.
+- [x] Add in-app feedback module and push notifications.
 
 ### Operations & QA
 - [ ] Define branching, PR review, and release cadence in CONTRIBUTING.md.
